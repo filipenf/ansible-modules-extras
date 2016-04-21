@@ -195,6 +195,9 @@ def create_eni(connection, module):
     instance_id = module.params.get("instance_id")
     if instance_id == 'None':
         instance_id = None
+        do_detach = True
+    else:
+        do_detach = False
     device_index = module.params.get("device_index")
     subnet_id = module.params.get('subnet_id')
     private_ip_address = module.params.get('private_ip_address')
@@ -203,19 +206,21 @@ def create_eni(connection, module):
     changed = False
 
     try:
-        eni = compare_eni(connection, module)
+        eni = find_eni(connection, module)
         if eni is None:
             eni = connection.create_network_interface(subnet_id, private_ip_address, description, security_groups)
             if instance_id is not None:
                 try:
                     eni.attach(instance_id, device_index)
-                except BotoServerError:
+                except BotoServerError as ex:
                     eni.delete()
                     raise
                 # Wait to allow creation / attachment to finish
                 wait_for_eni(eni, "attached")
                 eni.update()
             changed = True
+        else:
+            modify_eni(connection, module, eni)
 
     except BotoServerError as e:
         module.fail_json(msg=get_error_message(e.args[2]))
@@ -223,7 +228,7 @@ def create_eni(connection, module):
     module.exit_json(changed=changed, interface=get_eni_info(eni))
 
 
-def modify_eni(connection, module):
+def modify_eni(connection, module, eni):
 
     eni_id = module.params.get("eni_id")
     instance_id = module.params.get("instance_id")
@@ -233,6 +238,8 @@ def modify_eni(connection, module):
     else:
         do_detach = False
     device_index = module.params.get("device_index")
+    subnet_id = module.params.get('subnet_id')
+    private_ip_address = module.params.get('private_ip_address')
     description = module.params.get('description')
     security_groups = module.params.get('security_groups')
     force_detach = module.params.get("force_detach")
@@ -240,10 +247,8 @@ def modify_eni(connection, module):
     delete_on_termination = module.params.get("delete_on_termination")
     changed = False
 
+
     try:
-        # Get the eni with the eni_id specified
-        eni_result_set = connection.get_all_network_interfaces(eni_id)
-        eni = eni_result_set[0]
         if description is not None:
             if eni.description != description:
                 connection.modify_network_interface_attribute(eni.id, "description", description)
@@ -311,20 +316,17 @@ def delete_eni(connection, module):
         else:
             module.fail_json(msg=get_error_message(e.args[2]))
 
-def compare_eni(connection, module):
+def find_eni(connection, module):
 
     eni_id = module.params.get("eni_id")
     subnet_id = module.params.get('subnet_id')
     private_ip_address = module.params.get('private_ip_address')
-    description = module.params.get('description')
-    security_groups = module.params.get('security_groups')
 
     try:
         all_eni = connection.get_all_network_interfaces(eni_id)
 
         for eni in all_eni:
-            remote_security_groups = get_sec_group_list(eni.groups)
-            if (eni.subnet_id == subnet_id) and (eni.private_ip_address == private_ip_address) and (eni.description == description) and (sorted(remote_security_groups) == sorted(security_groups)):
+            if (eni.subnet_id == subnet_id) and (eni.private_ip_address == private_ip_address):
                 return eni
 
     except BotoServerError as e:
@@ -370,7 +372,7 @@ def main():
     if region:
         try:
             connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
+        except (boto.exception.NoAuthHandlerFound, StandardError), e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")
@@ -384,7 +386,8 @@ def main():
                 module.fail_json(msg="subnet_id must be specified when state=present")
             create_eni(connection, module)
         else:
-            modify_eni(connection, module)
+            eni = find_eni(connection, module)
+            modify_eni(connection, module, eni)
     elif state == 'absent':
         if eni_id is None:
             module.fail_json(msg="eni_id must be specified")
@@ -397,5 +400,4 @@ from ansible.module_utils.ec2 import *
 # this is magic, see lib/ansible/module_common.py
 #<<INCLUDE_ANSIBLE_MODULE_COMMON>>
 
-if __name__ == '__main__':
-    main()
+main()
