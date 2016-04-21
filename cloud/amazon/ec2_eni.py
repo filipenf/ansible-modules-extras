@@ -195,9 +195,6 @@ def create_eni(connection, module):
     instance_id = module.params.get("instance_id")
     if instance_id == 'None':
         instance_id = None
-        do_detach = True
-    else:
-        do_detach = False
     device_index = module.params.get("device_index")
     subnet_id = module.params.get('subnet_id')
     private_ip_address = module.params.get('private_ip_address')
@@ -212,7 +209,7 @@ def create_eni(connection, module):
             if instance_id is not None:
                 try:
                     eni.attach(instance_id, device_index)
-                except BotoServerError as ex:
+                except BotoServerError:
                     eni.delete()
                     raise
                 # Wait to allow creation / attachment to finish
@@ -372,7 +369,7 @@ def main():
     if region:
         try:
             connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")
@@ -400,4 +397,5 @@ from ansible.module_utils.ec2 import *
 # this is magic, see lib/ansible/module_common.py
 #<<INCLUDE_ANSIBLE_MODULE_COMMON>>
 
-main()
+if __name__ == '__main__':
+    main()
