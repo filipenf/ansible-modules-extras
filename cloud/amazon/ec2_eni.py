@@ -143,7 +143,6 @@ try:
 except ImportError:
     HAS_BOTO = False
 
-
 def get_error_message(xml_string):
 
     root = ET.fromstring(xml_string)
@@ -320,11 +319,16 @@ def find_eni(connection, module):
     private_ip_address = module.params.get('private_ip_address')
 
     try:
-        all_eni = connection.get_all_network_interfaces(eni_id)
+        if private_ip_address and subnet_id:
+            filters = {
+                    'private-ip-address': private_ip_address,
+                    'subnet-id': subnet_id
+            }
+        else:
+            filters = None
 
-        for eni in all_eni:
-            if (eni.subnet_id == subnet_id) and (eni.private_ip_address == private_ip_address):
-                return eni
+        eni_result = connection.get_all_network_interfaces(eni_id, filters=filters)
+        return eni_result[0]
 
     except BotoServerError as e:
         module.fail_json(msg=get_error_message(e.args[2]))
